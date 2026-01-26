@@ -5,71 +5,68 @@ import re
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
-st.set_page_config(page_title="삼천리 홍보팀 게재 관리", layout="wide")
+# 페이지 설정
+st.set_page_config(page_title="삼천리 홍보팀 게재 현황판", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_NAME = "2026년"
 
-st.title("🏢 매체별 게재 현황판 자동 업데이트")
+st.title("🏢 매체 고정형 게재 현황판 업데이트")
 
-tab1, tab2 = st.tabs(["📥 새 보도자료 분석 및 기록", "📊 현재 현황 확인"])
+# 1. 보도자료 정보 입력
+col1, col2 = st.columns([1, 2])
+with col1:
+    doc_date = st.date_input("배포 날짜", datetime.now())
+    doc_title = st.text_input("보도자료 제목", placeholder="예: 시무식 / EV 대표이사 등")
+with col2:
+    raw_html = st.text_area("모니터링 HTML 소스 붙여넣기", height=200)
 
-with tab1:
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        doc_date = st.date_input("배포 날짜", datetime.now())
-        doc_title = st.text_input("보도자료 제목", placeholder="제목을 입력하세요")
+if st.button("🚀 현황판에 체크 표시 추가"):
+    if not doc_title or not raw_html:
+        st.warning("제목과 HTML 소스를 입력해주세요.")
+    else:
+        # [데이터 읽기] 헤더를 포함하지 않고 원본 그대로 읽어옴
+        df = conn.read(worksheet=SHEET_NAME, header=None)
         
-    with col2:
-        raw_html = st.text_area("HTML 소스를 붙여넣으세요.", height=300)
+        # [매체명 추출] 이미지상 B열(인덱스 1)에 매체명이 위치함
+        # 5행(인덱스 4) 정도부터 실제 매체 리스트가 시작된다고 가정 (필요시 조정 가능)
+        start_row = 4 
+        media_list = df.iloc[start_row:, 1].tolist()
 
-    if st.button("🚀 현황판에 기록하기"):
-        if not doc_title or not raw_html:
-            st.warning("제목과 소스 코드를 입력해주세요.")
-        else:
-            # 1. 시트 데이터 가져오기
-            df_existing = conn.read(worksheet=SHEET_NAME)
-            
-            # [수정] 이미지 양식상 매체명은 보통 2번째 열(B열)에 위치함
-            # 'Unnamed' 등으로 표시될 수 있어 인덱스로 접근합니다.
-            media_list = df_existing.iloc[:, 1].tolist() # 2번째 열 전체 읽기
+        # [HTML 분석] 게재된 매체명 찾기
+        soup = BeautifulSoup(raw_html, 'html.parser')
+        rows = soup.find_all('td', style=lambda x: x and 'padding-left:20px' in x)
+        found_media_set = set()
+        for r in rows:
+            media_info = r.find('span')
+            if media_info:
+                m_text = media_info.get_text(strip=True)
+                match = re.search(r'\((.*?) \d{4}', m_text)
+                if match:
+                    found_media_set.add(match.group(1).strip())
 
-            # 2. HTML 소스에서 실제 보도자료를 쓴 매체들만 추출
-            soup = BeautifulSoup(raw_html, 'html.parser')
-            # <td> 태그 중 기사 정보가 담긴 부분만 타겟팅
-            rows = soup.find_all('td', style=lambda x: x and 'padding-left:20px' in x)
+        # [새 데이터 열 생성]
+        # 날짜와 제목을 상단에 배치 (이미지 양식 반영)
+        new_column = [None] * len(df)
+        new_column[2] = doc_date.strftime('%m/%d') # 3행에 날짜
+        new_column[3] = doc_title                   # 4행에 제목
+        
+        # 실제 매체별 매칭 결과 (O 표시)
+        for i, m_name in enumerate(media_list):
+            m_name_str = str(m_name).strip()
+            # 매체명에 불필요한 (배포X) 등 제거 후 비교
+            clean_name = re.sub(r'\(.*?\)', '', m_name_str).strip()
             
-            found_media_set = set()
-            for row in rows:
-                media_info = row.find('span')
-                if media_info:
-                    media_text = media_info.get_text(strip=True)
-                    # '(매체명 2026/01/23)' 형식에서 매체명만 추출
-                    match = re.search(r'\((.*?) \d{4}', media_text)
-                    if match:
-                        found_media_set.add(match.group(1).strip())
+            is_matched = any(clean_name in f_media or f_media in clean_name for f_media in found_media_set)
+            new_column[start_row + i] = "○" if is_matched else ""
 
-            # 3. 새로운 열 데이터 생성 (유연한 매칭 적용)
-            new_col_name = f"{doc_date.strftime('%m/%d')}\n{doc_title}"
-            new_status = []
-            
-            for m_name in media_list:
-                m_name_str = str(m_name).strip()
-                # 시트의 매체명(예: 가스신문)이 추출된 매체셋에 포함되어 있는지 확인
-                # '가스신문(배포X)' 같은 경우도 '가스신문'이 포함되어 있으면 인식하도록 개선
-                is_matched = False
-                for f_media in found_media_set:
-                    if f_media in m_name_str or m_name_str in f_media:
-                        is_matched = True
-                        break
-                
-                new_status.append("✅" if is_matched else "-")
-            
-            # 4. 시트에 새로운 열 추가 및 업데이트
-            df_existing[new_col_name] = new_status
-            conn.update(worksheet=SHEET_NAME, data=df_existing)
-            st.success(f"✅ '{doc_title}' 결과가 기록되었습니다!")
+        # [시트 업데이트] 맨 오른쪽 새로운 열 추가
+        df[df.shape[1]] = new_column
+        
+        # 데이터가 꼬이지 않도록 전체 프레임을 그대로 업데이트
+        conn.update(worksheet=SHEET_NAME, data=df)
+        st.success(f"✅ '{doc_title}' 결과가 기록되었습니다. 구글 시트를 확인하세요!")
 
-with tab2:
-    st.subheader("📋 현재 현황판")
-    df_display = conn.read(worksheet=SHEET_NAME)
-    st.dataframe(df_display, use_container_width=True)
+st.divider()
+st.subheader("📋 현재 시트 상태 확인")
+df_view = conn.read(worksheet=SHEET_NAME)
+st.dataframe(df_view)
