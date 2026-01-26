@@ -53,34 +53,42 @@ if st.button("🚀 현황판 업데이트 시작"):
             with st.expander("추출된 매체명 확인"):
                 st.write(sorted(found_media))
             
-            # 3. C열(index 2)이 비어있는지 확인
+            # 3. C열(index 2)부터 빈 열 찾기
+            # 스프레드시트 구조: 
+            # - 0행(1행): 번호 (0, 1, 2, 3...)
+            # - 1행(2행): 헤더 (0, 매체명, 1, 2...)
+            # - 2행(3행): 날짜/제목 시작
+            
             if df.shape[1] < 3:
-                # C열이 없으면 생성
                 while df.shape[1] < 3:
                     df[df.shape[1]] = ""
             
-            # 4. C열부터 빈 열 찾기 (1행 기준으로 확인)
+            # C열(index 2)부터 빈 열 찾기 - 1행(index 1)의 값으로 판단
             target_col_idx = 2  # C열부터 시작
             while target_col_idx < df.shape[1]:
-                # 해당 열의 1행이 비어있으면 사용
-                if df.iloc[0, target_col_idx] == "":
+                # 1행(헤더)이 비어있거나 숫자가 아니면 사용
+                header_val = str(df.iloc[1, target_col_idx]).strip()
+                if header_val == "" or not header_val.isdigit():
                     break
                 target_col_idx += 1
             
-            # 5. 새 열이 필요하면 추가
+            # 4. 새 열이 필요하면 추가
             if target_col_idx >= df.shape[1]:
                 df[target_col_idx] = ""
             
-            # 6. 새로운 열 데이터 생성 (1행=번호, 2행=날짜, 3행=제목)
-            col_number = target_col_idx - 1  # C열=2, D열=3, ...
-            df.iloc[0, target_col_idx] = str(col_number)  # 1행: 번호
-            df.iloc[1, target_col_idx] = doc_date.strftime('%m/%d')  # 2행: 날짜
-            df.iloc[2, target_col_idx] = doc_title  # 3행: 제목
+            # 5. 열 번호 계산 (C=1, D=2, E=3...)
+            col_number = target_col_idx - 1
             
-            # 7. 4행부터 매칭 (index 3부터)
+            # 6. 데이터 입력
+            df.iloc[0, target_col_idx] = str(col_number)  # 0행: 번호
+            df.iloc[1, target_col_idx] = str(col_number)  # 1행: 번호 (헤더)
+            df.iloc[2, target_col_idx] = doc_date.strftime('%m/%d')  # 2행: 날짜
+            df.iloc[3, target_col_idx] = doc_title  # 3행: 제목
+            
+            # 7. 4행(index 4)부터 매체 매칭
             match_count = 0
-            for i in range(3, len(df)):
-                m_name = str(df.iloc[i, 1]).strip()  # B열
+            for i in range(4, len(df)):
+                m_name = str(df.iloc[i, 1]).strip()  # B열 매체명
                 
                 if not m_name or m_name in ["매체명", "구분", ""]:
                     df.iloc[i, target_col_idx] = ""
@@ -92,7 +100,6 @@ if st.button("🚀 현황판 업데이트 시작"):
                 # 매칭 체크
                 is_matched = False
                 for fm in found_media:
-                    # 양방향 포함 체크
                     if pure_name in fm or fm in pure_name:
                         is_matched = True
                         break
@@ -107,13 +114,21 @@ if st.button("🚀 현황판 업데이트 시작"):
             conn.update(worksheet=SHEET_NAME, data=df)
             
             col_letter = chr(65 + target_col_idx)  # A=65, B=66, C=67...
-            st.success(f"✅ {col_letter}열에 업데이트 완료! (매칭: {match_count}개)")
+            st.success(f"✅ {col_letter}열(번호 {col_number})에 업데이트 완료! (매칭: {match_count}개)")
             
             # 결과 미리보기
             with st.expander("📊 업데이트 결과 미리보기"):
-                preview_df = df.iloc[:50, [1, target_col_idx]]
-                preview_df.columns = ["매체명", "결과"]
-                st.dataframe(preview_df[preview_df["결과"] != ""], use_container_width=True)
+                preview_data = []
+                for i in range(4, min(50, len(df))):
+                    media = str(df.iloc[i, 1]).strip()
+                    result = str(df.iloc[i, target_col_idx]).strip()
+                    if result == "O":
+                        preview_data.append({"매체명": media, "결과": result})
+                
+                if preview_data:
+                    st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+                else:
+                    st.info("매칭된 매체가 없습니다.")
             
             st.rerun()
             
