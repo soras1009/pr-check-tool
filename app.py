@@ -5,12 +5,14 @@ import re
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
+# 페이지 설정
 st.set_page_config(page_title="삼천리 홍보팀 게재 관리", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_NAME = "2026년"
 
 st.title("🏢 2026년 보도자료 게재 현황판")
 
+# 상단 입력부
 col1, col2 = st.columns([1, 2])
 with col1:
     doc_date = st.date_input("배포 날짜", datetime.now())
@@ -23,9 +25,15 @@ if st.button("🚀 현황판 업데이트 시작"):
         st.warning("내용을 입력해주세요.")
     else:
         try:
-            # 1. 시트 읽기 (B열 매체명 리스트 보호)
+            # 1. 시트 읽기 (원본 그대로 읽어옴)
             df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
             
+            # [핵심 수정] 시트 행이 부족하면 강제로 늘려줌 (Index Error 방지)
+            if len(df) < 100:
+                padding_size = 100 - len(df)
+                padding = pd.DataFrame([[""] * df.shape[1]] * padding_size)
+                df = pd.concat([df, padding], ignore_index=True)
+
             # 2. HTML 매체명 추출
             soup = BeautifulSoup(raw_html, 'html.parser')
             found_media = set()
@@ -35,27 +43,39 @@ if st.button("🚀 현황판 업데이트 시작"):
                     m = re.search(r'\((.*?) \d{4}', span.get_text())
                     if m: found_media.add(m.group(1).strip())
 
-            # 3. 신규 열 데이터 생성
+            # 3. 새로운 열 데이터 생성
             new_col = [""] * len(df)
             new_col[1] = doc_date.strftime('%m/%d') # 2행 날짜
             new_col[2] = doc_title                   # 3행 제목
 
             # 4. B열(index 1) 기준 4행(index 3)부터 매칭
             for i in range(len(df)):
-                m_name = str(df.iloc[i, 1]).strip()
-                if i < 3 or not m_name or m_name in ["매체", "구분"]: continue
+                # B열이 존재하는지 확인
+                if df.shape[1] < 2: continue
                 
+                m_name = str(df.iloc[i, 1]).strip()
+                if i < 3 or not m_name or m_name in ["매체", "구분"]: 
+                    continue
+                
+                # 괄호 제거 후 비교
                 pure_name = re.sub(r'\(.*?\)', '', m_name).strip()
                 if any(pure_name in fm or fm in pure_name for fm in found_media):
                     new_col[i] = "✅"
                 else:
                     new_col[i] = "-"
 
-            # 5. 오른쪽 끝에 열 추가 후 업데이트
-            df[f"Col_{df.shape[1]}"] = new_col
+            # 5. 오른쪽 끝에 새 열 추가 (중복 방지를 위해 고유 이름 사용)
+            new_col_name = f"Result_{datetime.now().strftime('%H%M%S')}"
+            df[new_col_name] = new_col
+            
+            # 6. 시트 업데이트
             conn.update(worksheet=SHEET_NAME, data=df)
             st.success("✅ 업데이트 성공!")
             st.rerun()
 
         except Exception as e:
             st.error(f"오류 발생: {e}")
+
+st.divider()
+st.subheader("📋 실시간 현황판 미리보기")
+st.dataframe(conn.read(worksheet=SHEET_NAME, header=None).fillna(""))
