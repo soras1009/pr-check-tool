@@ -29,8 +29,8 @@ if st.button("🚀 현황판에 체크 표시 추가"):
         
         # [매체명 추출] 이미지상 B열(인덱스 1)에 매체명이 위치함
         # 5행(인덱스 4) 정도부터 실제 매체 리스트가 시작된다고 가정 (필요시 조정 가능)
-        start_row = 4 
-        media_list = df.iloc[start_row:, 1].tolist()
+        start_row = 2 
+        media_list = df.iloc[start_row:, 2].tolist()
 
         # [HTML 분석] 게재된 매체명 찾기
         soup = BeautifulSoup(raw_html, 'html.parser')
