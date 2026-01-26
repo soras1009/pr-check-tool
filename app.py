@@ -36,7 +36,7 @@ if st.button("🚀 현황판 업데이트 시작"):
                 padding = pd.DataFrame([[""] * df.shape[1]] * (100 - len(df)))
                 df = pd.concat([df, padding], ignore_index=True)
             
-            # 2. HTML 매체명 추출 (개선된 버전)
+            # 2. HTML 매체명 추출
             soup = BeautifulSoup(raw_html, 'html.parser')
             found_media = set()
             
@@ -59,11 +59,11 @@ if st.button("🚀 현황판 업데이트 시작"):
                 while df.shape[1] < 3:
                     df[df.shape[1]] = ""
             
-            # 4. C열부터 빈 열 찾기
+            # 4. C열부터 빈 열 찾기 (1행 기준으로 확인)
             target_col_idx = 2  # C열부터 시작
             while target_col_idx < df.shape[1]:
-                # 해당 열의 1,2,3행이 모두 비어있으면 사용
-                if all(df.iloc[i, target_col_idx] == "" for i in range(3)):
+                # 해당 열의 1행이 비어있으면 사용
+                if df.iloc[0, target_col_idx] == "":
                     break
                 target_col_idx += 1
             
@@ -71,10 +71,11 @@ if st.button("🚀 현황판 업데이트 시작"):
             if target_col_idx >= df.shape[1]:
                 df[target_col_idx] = ""
             
-            # 6. 새로운 열 데이터 생성
-            df.iloc[0, target_col_idx] = ""                    # 1행: 빈칸 (구분)
+            # 6. 새로운 열 데이터 생성 (1행=번호, 2행=날짜, 3행=제목)
+            col_number = target_col_idx - 1  # C열=2, D열=3, ...
+            df.iloc[0, target_col_idx] = str(col_number)  # 1행: 번호
             df.iloc[1, target_col_idx] = doc_date.strftime('%m/%d')  # 2행: 날짜
-            df.iloc[2, target_col_idx] = doc_title             # 3행: 제목
+            df.iloc[2, target_col_idx] = doc_title  # 3행: 제목
             
             # 7. 4행부터 매칭 (index 3부터)
             match_count = 0
@@ -88,7 +89,7 @@ if st.button("🚀 현황판 업데이트 시작"):
                 # 괄호 제거
                 pure_name = re.sub(r'\(.*?\)', '', m_name).strip()
                 
-                # 매칭 체크 (개선된 로직)
+                # 매칭 체크
                 is_matched = False
                 for fm in found_media:
                     # 양방향 포함 체크
@@ -105,7 +106,8 @@ if st.button("🚀 현황판 업데이트 시작"):
             # 8. 시트 업데이트
             conn.update(worksheet=SHEET_NAME, data=df)
             
-            st.success(f"✅ {chr(67 + target_col_idx - 2)}열에 업데이트 완료! (매칭: {match_count}개)")
+            col_letter = chr(65 + target_col_idx)  # A=65, B=66, C=67...
+            st.success(f"✅ {col_letter}열에 업데이트 완료! (매칭: {match_count}개)")
             
             # 결과 미리보기
             with st.expander("📊 업데이트 결과 미리보기"):
