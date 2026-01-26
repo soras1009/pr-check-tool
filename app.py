@@ -25,13 +25,12 @@ if st.button("🚀 현황판 업데이트 시작"):
         st.warning("내용을 입력해주세요.")
     else:
         try:
-            # 1. 시트 읽기 (원본 그대로 읽어옴)
+            # 1. 시트 읽기 (원본 유지)
             df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
             
-            # [핵심 수정] 시트 행이 부족하면 강제로 늘려줌 (Index Error 방지)
+            # [강제 행 확장] 최소 100행 확보하여 인덱스 에러 방지
             if len(df) < 100:
-                padding_size = 100 - len(df)
-                padding = pd.DataFrame([[""] * df.shape[1]] * padding_size)
+                padding = pd.DataFrame([[""] * df.shape[1]] * (100 - len(df)))
                 df = pd.concat([df, padding], ignore_index=True)
 
             # 2. HTML 매체명 추출
@@ -50,9 +49,7 @@ if st.button("🚀 현황판 업데이트 시작"):
 
             # 4. B열(index 1) 기준 4행(index 3)부터 매칭
             for i in range(len(df)):
-                # B열이 존재하는지 확인
-                if df.shape[1] < 2: continue
-                
+                # B열에 적힌 매체명 가져오기
                 m_name = str(df.iloc[i, 1]).strip()
                 if i < 3 or not m_name or m_name in ["매체", "구분"]: 
                     continue
@@ -64,18 +61,15 @@ if st.button("🚀 현황판 업데이트 시작"):
                 else:
                     new_col[i] = "-"
 
-            # 5. 오른쪽 끝에 새 열 추가 (중복 방지를 위해 고유 이름 사용)
-            new_col_name = f"Result_{datetime.now().strftime('%H%M%S')}"
-            df[new_col_name] = new_col
+            # 5. [중요] C열(index 2)부터 데이터를 채우도록 위치 강제 지정
+            # 이미 C열 이후에 데이터가 있다면 그 다음 빈 열을 찾습니다.
+            target_col_idx = max(2, df.shape[1]) 
+            df.insert(target_col_idx, f"Result_{datetime.now().strftime('%H%M%S')}", new_col)
             
             # 6. 시트 업데이트
             conn.update(worksheet=SHEET_NAME, data=df)
-            st.success("✅ 업데이트 성공!")
+            st.success("✅ C열에 업데이트 성공!")
             st.rerun()
 
         except Exception as e:
             st.error(f"오류 발생: {e}")
-
-st.divider()
-st.subheader("📋 실시간 현황판 미리보기")
-st.dataframe(conn.read(worksheet=SHEET_NAME, header=None).fillna(""))
