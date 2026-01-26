@@ -25,13 +25,13 @@ if st.button("🚀 현황판 업데이트 시작"):
         st.warning("제목과 HTML 소스를 모두 입력해 주세요.")
     else:
         try:
-            # 1. 시트 데이터 읽기
+            # 1. 시트 데이터 읽기 (원본 구조 그대로 유지)
             df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
             
-            # [안전장치] 행이 부족할 경우를 대비해 기본 100행 확보
-            if len(df) < 100:
-                padding_size = 100 - len(df)
-                padding = pd.DataFrame([[""] * df.shape[1]] * padding_size)
+            # [행 확보] 인덱스 오류 방지를 위해 최소 100행까지 확보
+            current_rows = len(df)
+            if current_rows < 100:
+                padding = pd.DataFrame([[""] * df.shape[1]] * (100 - current_rows))
                 df = pd.concat([df, padding], ignore_index=True)
 
             # 2. HTML에서 게재된 매체명 추출
@@ -44,39 +44,38 @@ if st.button("🚀 현황판 업데이트 시작"):
                     if m: 
                         found_media.add(m.group(1).strip())
 
-            # 3. 새로운 열 데이터 생성 (기존 행 수에 맞춤)
+            # 3. 새로운 열 데이터 생성 (기존 열의 맨 오른쪽에 추가)
             new_data = [""] * len(df)
             
-            # [위치 고정] 2행 날짜(index 1), 3행 제목(index 2)
+            # [위치 고정] 2행(index 1) 날짜, 3행(index 2) 제목
             new_data[1] = doc_date.strftime('%m/%d')
             new_data[2] = doc_title
 
             # 4. 매체명 매칭 (B열: 인덱스 1 기준)
-            # 4행(index 3)부터 매체 리스트 검사 시작
+            # 4행(index 3)부터 매체 리스트(가스신문 등) 검사
             for i in range(len(df)):
-                # B열에 데이터가 있는지 확인
+                # B열(index 1)의 값을 읽어옴
                 if df.shape[1] < 2: continue
                 
                 m_name = str(df.iloc[i, 1]).strip()
                 
-                # 4행 이전이거나 매체명이 없으면 스킵
+                # 4행(index 3) 이전이거나 매체명이 없으면 스킵
                 if i < 3 or not m_name or m_name in ["매체", "구분", "0", "1"]:
                     continue
                 
                 # 순수 매체명 추출 (괄호 제거)
                 pure_name = re.sub(r'\(.*?\)', '', m_name).strip()
                 
-                # 유연한 포함 관계 검사
+                # HTML 추출 명단과 비교
                 if any(pure_name in fm or fm in pure_name for fm in found_media):
                     new_data[i] = "✅"
                 else:
                     new_data[i] = "-"
 
-            # 5. 새로운 열 추가 및 업데이트
-            new_col_name = f"Result_{df.shape[1]}"
-            df[new_col_name] = new_data
+            # 5. 기존 DataFrame에 새로운 열 추가 (데이터가 밀리지 않게 열 이름 지정)
+            df[f"Result_{datetime.now().strftime('%H%M%S')}"] = new_data
             
-            # 구글 시트 업데이트
+            # 6. 구글 시트 업데이트 (전체 덮어쓰기 방식으로 구조 유지)
             conn.update(worksheet=SHEET_NAME, data=df)
             
             st.success(f"✅ '{doc_title}' 업데이트가 완료되었습니다!")
