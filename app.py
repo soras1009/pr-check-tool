@@ -6,110 +6,73 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
 # 페이지 설정
-st.set_page_config(page_title="삼천리 홍보팀 통합 대시보드", layout="wide")
+st.set_page_config(page_title="삼천리 홍보팀 게재 관리", layout="wide")
 
-# 구글 시트 연결 설정 (Secrets에 설정된 정보 활용)
+# 구글 시트 연결
 conn = st.connection("gsheets", type=GSheetsConnection)
-
-# 설정한 시트 이름 변수
 SHEET_NAME = "2026년"
 
-st.title("🏢 삼천리 홍보팀 게재 현황 누적 대시보드")
+st.title("🏢 매체별 게재 현황판 자동 업데이트")
 
-tab1, tab2 = st.tabs(["📥 데이터 분석 및 저장", "📊 누적 결과 대시보드"])
+# 탭 구성
+tab1, tab2 = st.tabs(["📥 새 보도자료 분석 및 기록", "📊 현재 현황 확인"])
 
 with tab1:
-    st.subheader("새 보도자료 분석")
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        doc_title = st.text_input("보도자료 제목", placeholder="예: 삼천리 이태호 사장 취임")
-        media_input = st.text_area("체크할 매체 리스트 (한 줄에 하나씩)", height=200, value="가스신문\n조선일보\n매일경제\n에너지신문")
-        target_media_list = [m.strip() for m in media_input.split('\n') if m.strip()]
-
-    with col2:
-        raw_html = st.text_area("모니터링 메일 HTML 소스 붙여넣기", height=250)
+        st.subheader("1. 보도자료 정보")
+        doc_date = st.date_input("배포 날짜", datetime.now())
+        doc_title = st.text_input("보도자료 제목", placeholder="예: 삼천리 미래사업 이태호 사장 취임")
         
-    if st.button("🚀 분석 및 구글 시트 저장"):
+    with col2:
+        st.subheader("2. 모니터링 HTML 소스")
+        raw_html = st.text_area("HTML 소스를 붙여넣으세요.", height=300)
+
+    if st.button("🚀 현황판에 기록하기"):
         if not doc_title or not raw_html:
-            st.warning("제목과 HTML 소스 코드를 모두 입력해주세요.")
+            st.warning("제목과 소스 코드를 입력해주세요.")
         else:
-            # 1. HTML 소스 파싱 및 기사 추출
+            # 1. 시트에서 현재 고정된 매체 리스트 읽어오기
+            # (이미지처럼 B열이나 특정 열에 매체명이 있다고 가정)
+            df_existing = conn.read(worksheet=SHEET_NAME)
+            
+            # 매체명이 들어있는 열 찾기 (이미지상 '전문지', '지방지' 옆 열)
+            # 여기서는 '매체명'이라는 컬럼이 있다고 가정하거나 첫 번째 열을 사용합니다.
+            media_column = df_existing.columns[1] # 보통 2번째 열에 매체명이 있음
+            media_list = df_existing[media_column].tolist()
+
+            # 2. HTML 소스 분석 (기사 추출)
             soup = BeautifulSoup(raw_html, 'html.parser')
             rows = soup.find_all('td', style=lambda x: x and 'padding-left:20px' in x)
             
-            found_articles = {}
+            found_media = []
             for row in rows:
-                link_tag = row.find('a', href=True)
                 media_info = row.find('span')
-                if link_tag and media_info:
-                    title = link_tag.get_text(strip=True)
+                if media_info:
                     media_text = media_info.get_text(strip=True)
-                    # 매체명 추출 (괄호 안 텍스트)
                     match = re.search(r'\((.*?) \d{4}', media_text)
                     if match:
-                        extracted_media = match.group(1).strip()
-                        found_articles[extracted_media] = title
+                        found_media.append(match.group(1).strip())
 
-            # 2. 새로운 데이터 행(Row) 생성
-            new_rows = []
-            today = datetime.now().strftime("%Y-%m-%d")
-            for media in target_media_list:
-                status = "✅ 게재" if media in found_articles else "❌ 미게재"
-                article_title = found_articles.get(media, "-")
-                new_rows.append({
-                    "날짜": today,
-                    "보도자료제목": doc_title,
-                    "매체명": media,
-                    "게재여부": status,
-                    "기사제목": article_title
-                })
+            # 3. 새로운 열 데이터 생성
+            new_col_name = f"{doc_date.strftime('%m/%d')}\n{doc_title}"
+            new_status = []
+            for media in media_list:
+                # 매체명이 포함되어 있는지 체크
+                if any(m in str(media) for m in found_media):
+                    new_status.append("✅")
+                else:
+                    new_status.append("-")
             
-            new_df = pd.DataFrame(new_rows)
-
-            # 3. 구글 시트 업데이트 (기존 데이터 유지하며 추가)
-            try:
-                # 기존 데이터 읽기
-                existing_data = conn.read(worksheet=SHEET_NAME)
-                # 데이터 합치기
-                updated_df = pd.concat([existing_data, new_df], ignore_index=True)
-                # 시트에 다시 쓰기
-                conn.update(worksheet=SHEET_NAME, data=updated_df)
-                st.success(f"✅ '{doc_title}' 관련 데이터 {len(new_rows)}건이 '{SHEET_NAME}' 시트에 저장되었습니다!")
-            except Exception as e:
-                st.error(f"시트 업데이트 중 오류가 발생했습니다: {e}")
+            # 4. 시트에 새로운 열 추가
+            df_existing[new_col_name] = new_status
+            
+            # 구글 시트 업데이트
+            conn.update(worksheet=SHEET_NAME, data=df_existing)
+            st.success(f"✅ '{doc_title}' 결과가 새로운 열에 기록되었습니다!")
 
 with tab2:
-    st.subheader(f"📈 {SHEET_NAME} 게재 기록 리포트")
-    
-    try:
-        # 실시간으로 시트 데이터 읽어오기
-        df_logs = conn.read(worksheet=SHEET_NAME)
-        
-        if not df_logs.empty:
-            # 대시보드 요약 지표
-            total_count = len(df_logs)
-            success_count = len(df_logs[df_logs["게재여부"] == "✅ 게재"])
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric("누적 데이터 수", f"{total_count}건")
-            m2.metric("누적 게재 성공", f"{success_count}건")
-            m3.metric("평균 게재율", f"{round(success_count/total_count*100, 1)}%" if total_count > 0 else "0%")
-            
-            st.divider()
-
-            # 필터 선택 (보도자료 제목별)
-            titles = ["전체 보기"] + sorted(list(df_logs["보도자료제목"].unique()), reverse=True)
-            selected = st.selectbox("기록 필터 (보도자료별)", titles)
-            
-            if selected != "전체 보기":
-                filtered_df = df_logs[df_logs["보도자료제목"] == selected]
-            else:
-                filtered_df = df_logs
-            
-            # 테이블 출력 (최신순 정렬)
-            st.dataframe(filtered_df.sort_values(by="날짜", ascending=False), use_container_width=True, hide_index=True)
-        else:
-            st.info("현재 시트에 저장된 데이터가 없습니다. 먼저 분석을 진행해 주세요.")
-    except Exception as e:
-        st.error(f"데이터를 불러올 수 없습니다. 시트의 탭 이름이 '{SHEET_NAME}' 인지 확인해 주세요. (에러: {e})")
+    st.subheader("📋 현재 현황판 (구글 시트 동기화)")
+    df_display = conn.read(worksheet=SHEET_NAME)
+    st.dataframe(df_display, use_container_width=True)
