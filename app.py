@@ -7,6 +7,7 @@ from datetime import datetime
 
 # 페이지 설정
 st.set_page_config(page_title="삼천리 홍보팀 게재 관리", layout="wide")
+
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_NAME = "2026년"
 
@@ -14,9 +15,11 @@ st.title("🏢 2026년 보도자료 게재 현황판")
 
 # 상단 입력부
 col1, col2 = st.columns([1, 2])
+
 with col1:
     doc_date = st.date_input("배포 날짜", datetime.now())
     doc_title = st.text_input("보도자료 제목", placeholder="제목을 입력하세요")
+
 with col2:
     raw_html = st.text_area("HTML 소스 붙여넣기", height=200)
 
@@ -25,51 +28,93 @@ if st.button("🚀 현황판 업데이트 시작"):
         st.warning("내용을 입력해주세요.")
     else:
         try:
-            # 1. 시트 읽기 (원본 유지)
+            # 1. 시트 읽기
             df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
             
-            # [강제 행 확장] 최소 100행 확보하여 인덱스 에러 방지
+            # 최소 100행 확보
             if len(df) < 100:
                 padding = pd.DataFrame([[""] * df.shape[1]] * (100 - len(df)))
                 df = pd.concat([df, padding], ignore_index=True)
-
-            # 2. HTML 매체명 추출
+            
+            # 2. HTML 매체명 추출 (개선된 버전)
             soup = BeautifulSoup(raw_html, 'html.parser')
             found_media = set()
+            
             for r in soup.find_all('td', style=lambda x: x and 'padding-left:20px' in x):
                 span = r.find('span')
                 if span:
-                    m = re.search(r'\((.*?) \d{4}', span.get_text())
-                    if m: found_media.add(m.group(1).strip())
-
-            # 3. 새로운 열 데이터 생성
-            new_col = [""] * len(df)
-            new_col[1] = doc_date.strftime('%m/%d') # 2행 날짜
-            new_col[2] = doc_title                   # 3행 제목
-
-            # 4. B열(index 1) 기준 4행(index 3)부터 매칭
-            for i in range(len(df)):
-                # B열에 적힌 매체명 가져오기
-                m_name = str(df.iloc[i, 1]).strip()
-                if i < 3 or not m_name or m_name in ["매체", "구분"]: 
+                    # 괄호 안의 매체명 추출
+                    m = re.search(r'\((.*?)\s+\d{4}/', span.get_text())
+                    if m:
+                        media_name = m.group(1).strip()
+                        found_media.add(media_name)
+            
+            st.info(f"🔍 발견된 매체: {len(found_media)}개")
+            with st.expander("추출된 매체명 확인"):
+                st.write(sorted(found_media))
+            
+            # 3. C열(index 2)이 비어있는지 확인
+            if df.shape[1] < 3:
+                # C열이 없으면 생성
+                while df.shape[1] < 3:
+                    df[df.shape[1]] = ""
+            
+            # 4. C열부터 빈 열 찾기
+            target_col_idx = 2  # C열부터 시작
+            while target_col_idx < df.shape[1]:
+                # 해당 열의 1,2,3행이 모두 비어있으면 사용
+                if all(df.iloc[i, target_col_idx] == "" for i in range(3)):
+                    break
+                target_col_idx += 1
+            
+            # 5. 새 열이 필요하면 추가
+            if target_col_idx >= df.shape[1]:
+                df[target_col_idx] = ""
+            
+            # 6. 새로운 열 데이터 생성
+            df.iloc[0, target_col_idx] = ""                    # 1행: 빈칸 (구분)
+            df.iloc[1, target_col_idx] = doc_date.strftime('%m/%d')  # 2행: 날짜
+            df.iloc[2, target_col_idx] = doc_title             # 3행: 제목
+            
+            # 7. 4행부터 매칭 (index 3부터)
+            match_count = 0
+            for i in range(3, len(df)):
+                m_name = str(df.iloc[i, 1]).strip()  # B열
+                
+                if not m_name or m_name in ["매체명", "구분", ""]:
+                    df.iloc[i, target_col_idx] = ""
                     continue
                 
-                # 괄호 제거 후 비교
+                # 괄호 제거
                 pure_name = re.sub(r'\(.*?\)', '', m_name).strip()
-                if any(pure_name in fm or fm in pure_name for fm in found_media):
-                    new_col[i] = "✅"
+                
+                # 매칭 체크 (개선된 로직)
+                is_matched = False
+                for fm in found_media:
+                    # 양방향 포함 체크
+                    if pure_name in fm or fm in pure_name:
+                        is_matched = True
+                        break
+                
+                if is_matched:
+                    df.iloc[i, target_col_idx] = "O"
+                    match_count += 1
                 else:
-                    new_col[i] = "-"
-
-            # 5. [중요] C열(index 2)부터 데이터를 채우도록 위치 강제 지정
-            # 이미 C열 이후에 데이터가 있다면 그 다음 빈 열을 찾습니다.
-            target_col_idx = max(2, df.shape[1]) 
-            df.insert(target_col_idx, f"Result_{datetime.now().strftime('%H%M%S')}", new_col)
+                    df.iloc[i, target_col_idx] = ""
             
-            # 6. 시트 업데이트
+            # 8. 시트 업데이트
             conn.update(worksheet=SHEET_NAME, data=df)
-            st.success("✅ C열에 업데이트 성공!")
+            
+            st.success(f"✅ {chr(67 + target_col_idx - 2)}열에 업데이트 완료! (매칭: {match_count}개)")
+            
+            # 결과 미리보기
+            with st.expander("📊 업데이트 결과 미리보기"):
+                preview_df = df.iloc[:50, [1, target_col_idx]]
+                preview_df.columns = ["매체명", "결과"]
+                st.dataframe(preview_df[preview_df["결과"] != ""], use_container_width=True)
+            
             st.rerun()
-
+            
         except Exception as e:
-            st.error(f"오류 발생: {e}")
+            st.error(f"❌ 오류 발생: {e}")
+            st.exception(e)
