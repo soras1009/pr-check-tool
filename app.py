@@ -28,6 +28,12 @@ if st.button("🚀 현황판 업데이트 시작"):
             # 1. 시트 데이터 읽기
             df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
             
+            # [중요] 행 부족 에러 방지 로직: 최소 10행까지는 강제로 생성
+            # 매체 리스트가 4행부터 시작하므로, 시트가 그보다 작으면 늘려줍니다.
+            if len(df) < 10:
+                for _ in range(10 - len(df)):
+                    df.loc[len(df)] = [""] * df.shape[1]
+
             # 2. HTML에서 게재된 매체명 추출
             soup = BeautifulSoup(raw_html, 'html.parser')
             found_media = set()
@@ -41,27 +47,26 @@ if st.button("🚀 현황판 업데이트 시작"):
             new_col_index = df.shape[1]
             new_data = [""] * len(df)
             
-            # [사용자 요청 반영 위치 조정]
-            # 1행(index 0): 비워둠
+            # [위치 지정]
             # 2행(index 1): 배포 날짜
             # 3행(index 2): 보도자료 제목
-            if len(new_data) >= 3:
-                new_data[1] = doc_date.strftime('%m/%d')
-                new_data[2] = doc_title
+            new_data[1] = doc_date.strftime('%m/%d')
+            new_data[2] = doc_title
 
             # 4. 매체명 매칭 (B열: 인덱스 1)
-            # 4행(index 3)부터 매체 리스트(가스신문 등)가 시작됨
+            # 4행(index 3)부터 매체 리스트(가스신문 등) 검사
             for i in range(len(df)):
+                # B열이 없는 경우 방지
+                if df.shape[1] < 2: continue
+                
                 cell_value = str(df.iloc[i, 1]).strip()
                 
-                # 매체 리스트 시작점(4행) 이전이거나 빈칸이면 패스
+                # 4행 이전이거나 매체명이 없으면 스킵
                 if i < 3 or not cell_value or cell_value in ["매체", "구분"]:
                     continue
                 
-                # 순수 매체명 추출 (괄호 제거)
                 pure_name = re.sub(r'\(.*?\)', '', cell_value).strip()
                 
-                # HTML 추출 명단과 비교
                 if any(pure_name in fm or fm in pure_name for fm in found_media):
                     new_data[i] = "✅"
                 else:
