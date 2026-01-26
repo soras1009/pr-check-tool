@@ -3,3 +3,6 @@ pandas
 scikit-learn
 beautifulsoup4
 requests
+st-gsheets-connection
+pandas
+beautifulsoup4
