@@ -14,7 +14,7 @@ SHEET_NAME = "2026년"
 st.title("🏢 2026년 보도자료 게재 현황판")
 
 # 연결 상태 확인
-with st.expander("🔧 연결 상태 확인", expanded=True):
+with st.expander("🔧 연결 상태 확인", expanded=False):
     try:
         test_df = conn.read(worksheet=SHEET_NAME, usecols=list(range(50)), header=None, ttl=0)
         st.success(f"✅ 구글 시트 읽기 성공! (행: {len(test_df)}, 열: {test_df.shape[1]})")
@@ -65,9 +65,9 @@ if st.button("🚀 현황판 업데이트 시작"):
             # 1. 시트 읽기 - 범위 지정 (50개 열까지)
             df = conn.read(worksheet=SHEET_NAME, usecols=list(range(50)), header=None).fillna("")
             
-            # 최소 100행 확보
-            if len(df) < 100:
-                padding = pd.DataFrame([[""] * df.shape[1]] * (100 - len(df)))
+            # 최소 200행 확보 (매체 150개 + 여유)
+            if len(df) < 200:
+                padding = pd.DataFrame([[""] * df.shape[1]] * (200 - len(df)))
                 df = pd.concat([df, padding], ignore_index=True)
             
             # 2. HTML 매체명 추출
@@ -87,22 +87,21 @@ if st.button("🚀 현황판 업데이트 시작"):
             with st.expander("추출된 매체명 확인"):
                 st.write(sorted(found_media))
             
-            # 3. C열(index 2)부터 빈 열 찾기
-            # 스프레드시트 구조: 
-            # - 0행(1행): 번호 (0, 1, 2, 3...)
-            # - 1행(2행): 헤더 (0, 매체명, 1, 2...)
-            # - 2행(3행): 날짜/제목 시작
+            # 3. 새로운 구조에 맞춰 처리
+            # - 0행(1행): 날짜들
+            # - 1행(2행): 제목들
+            # - 2행(3행)부터: 매체명 & 게재 여부
             
+            # C열(index 2)부터 빈 열 찾기
             if df.shape[1] < 3:
                 while df.shape[1] < 3:
                     df[df.shape[1]] = ""
             
-            # C열(index 2)부터 빈 열 찾기 - 1행(index 1)의 값으로 판단
+            # C열부터 빈 열 찾기 - 0행(날짜)이 비어있는 열 찾기
             target_col_idx = 2  # C열부터 시작
             while target_col_idx < df.shape[1]:
-                # 1행(헤더)이 비어있거나 숫자가 아니면 사용
-                header_val = str(df.iloc[1, target_col_idx]).strip()
-                if header_val == "" or not header_val.isdigit():
+                date_val = str(df.iloc[0, target_col_idx]).strip()
+                if date_val == "":
                     break
                 target_col_idx += 1
             
@@ -110,18 +109,17 @@ if st.button("🚀 현황판 업데이트 시작"):
             if target_col_idx >= df.shape[1]:
                 df[target_col_idx] = ""
             
-            # 5. 열 번호 계산 (C=1, D=2, E=3...)
-            col_number = target_col_idx - 1
+            # 5. B1에 "매체명" 헤더가 없으면 추가
+            if str(df.iloc[0, 1]).strip() == "":
+                df.iloc[0, 1] = "매체명"
             
             # 6. 데이터 입력
-            df.iloc[0, target_col_idx] = str(col_number)  # 0행: 번호
-            df.iloc[1, target_col_idx] = str(col_number)  # 1행: 번호 (헤더)
-            df.iloc[2, target_col_idx] = doc_date.strftime('%m/%d')  # 2행: 날짜
-            df.iloc[3, target_col_idx] = doc_title  # 3행: 제목
+            df.iloc[0, target_col_idx] = doc_date.strftime('%m/%d')  # 0행: 날짜
+            df.iloc[1, target_col_idx] = doc_title  # 1행: 제목
             
-            # 7. 4행(index 4)부터 매체 매칭
+            # 7. 2행(index 2)부터 매체 매칭
             match_count = 0
-            for i in range(4, len(df)):
+            for i in range(2, len(df)):
                 m_name = str(df.iloc[i, 1]).strip()  # B열 매체명
                 
                 if not m_name or m_name in ["매체명", "구분", ""]:
@@ -139,10 +137,10 @@ if st.button("🚀 현황판 업데이트 시작"):
                         break
                 
                 if is_matched:
-                    df.iloc[i, target_col_idx] = "O"
+                    df.iloc[i, target_col_idx] = "v"  # v 표시
                     match_count += 1
                 else:
-                    df.iloc[i, target_col_idx] = ""
+                    df.iloc[i, target_col_idx] = ""  # 빈칸
             
             # 8. 시트 업데이트
             st.info("⏳ 구글 시트에 데이터를 쓰는 중...")
@@ -150,16 +148,16 @@ if st.button("🚀 현황판 업데이트 시작"):
             # 업데이트 전 데이터 확인
             st.write("업데이트할 데이터 샘플:")
             st.write(f"- 대상 열: {chr(65 + target_col_idx)}열 (index {target_col_idx})")
-            st.write(f"- 날짜: {df.iloc[2, target_col_idx]}")
-            st.write(f"- 제목: {df.iloc[3, target_col_idx]}")
+            st.write(f"- 날짜: {df.iloc[0, target_col_idx]}")
+            st.write(f"- 제목: {df.iloc[1, target_col_idx]}")
             
             try:
-                # ttl=0으로 캐시 무효화
+                # 업데이트
                 result = conn.update(worksheet=SHEET_NAME, data=df)
                 
                 col_letter = chr(65 + target_col_idx)
-                st.success(f"✅ {col_letter}열(번호 {col_number})에 업데이트 완료! (매칭: {match_count}개)")
-                st.info("💡 구글 시트를 새로고침(F5)해서 확인해보세요!")
+                st.success(f"✅ {col_letter}열에 업데이트 완료! (매칭: {match_count}개)")
+                st.info("💡 구글 시트를 새로고침(Ctrl+Shift+R)해서 확인해보세요!")
                 
                 # 업데이트 결과 확인
                 if result is not None:
@@ -173,11 +171,11 @@ if st.button("🚀 현황판 업데이트 시작"):
             # 결과 미리보기
             with st.expander("📊 업데이트 결과 미리보기"):
                 preview_data = []
-                for i in range(4, min(50, len(df))):
+                for i in range(2, min(200, len(df))):
                     media = str(df.iloc[i, 1]).strip()
                     result = str(df.iloc[i, target_col_idx]).strip()
-                    if result == "O":
-                        preview_data.append({"매체명": media, "결과": result})
+                    if result == "v" and media:
+                        preview_data.append({"매체명": media, "결과": "✓"})
                 
                 if preview_data:
                     st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
