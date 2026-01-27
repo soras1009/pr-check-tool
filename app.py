@@ -13,6 +13,22 @@ SHEET_NAME = "2026년"
 
 st.title("🏢 2026년 보도자료 게재 현황판")
 
+# 연결 상태 확인
+with st.expander("🔧 연결 상태 확인"):
+    try:
+        test_df = conn.read(worksheet=SHEET_NAME, header=None, ttl=0)
+        st.success(f"✅ 구글 시트 읽기 성공! (행: {len(test_df)}, 열: {test_df.shape[1]})")
+        st.write("첫 5행 미리보기:")
+        st.dataframe(test_df.head())
+    except Exception as e:
+        st.error(f"❌ 구글 시트 연결 실패: {e}")
+        st.info("""
+        **해결 방법:**
+        1. Streamlit Cloud → Settings → Secrets 확인
+        2. Service Account에 편집 권한 부여
+        3. 스프레드시트 URL 확인
+        """)
+
 # 상단 입력부
 col1, col2 = st.columns([1, 2])
 
@@ -111,10 +127,30 @@ if st.button("🚀 현황판 업데이트 시작"):
                     df.iloc[i, target_col_idx] = ""
             
             # 8. 시트 업데이트
-            conn.update(worksheet=SHEET_NAME, data=df)
+            st.info("⏳ 구글 시트에 데이터를 쓰는 중...")
             
-            col_letter = chr(65 + target_col_idx)  # A=65, B=66, C=67...
-            st.success(f"✅ {col_letter}열(번호 {col_number})에 업데이트 완료! (매칭: {match_count}개)")
+            # 업데이트 전 데이터 확인
+            st.write("업데이트할 데이터 샘플:")
+            st.write(f"- 대상 열: {chr(65 + target_col_idx)}열 (index {target_col_idx})")
+            st.write(f"- 날짜: {df.iloc[2, target_col_idx]}")
+            st.write(f"- 제목: {df.iloc[3, target_col_idx]}")
+            
+            try:
+                # ttl=0으로 캐시 무효화
+                result = conn.update(worksheet=SHEET_NAME, data=df)
+                
+                col_letter = chr(65 + target_col_idx)
+                st.success(f"✅ {col_letter}열(번호 {col_number})에 업데이트 완료! (매칭: {match_count}개)")
+                st.info("💡 구글 시트를 새로고침(F5)해서 확인해보세요!")
+                
+                # 업데이트 결과 확인
+                if result is not None:
+                    st.write("업데이트 결과:", result)
+                    
+            except Exception as update_error:
+                st.error(f"❌ 시트 업데이트 실패: {update_error}")
+                st.write("에러 상세:")
+                st.exception(update_error)
             
             # 결과 미리보기
             with st.expander("📊 업데이트 결과 미리보기"):
