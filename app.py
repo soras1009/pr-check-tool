@@ -166,7 +166,7 @@ if st.button("🚀 현황판 업데이트 시작"):
                 else:
                     st.info("매칭된 매체가 없습니다.")
             
-            st.rerun()
+            # st.rerun() 제거 - 무한 루프 방지
             
         except Exception as e:
             st.error(f"❌ 오류 발생: {e}")
