@@ -14,10 +14,28 @@ SHEET_NAME = "2026년"
 st.title("🏢 2026년 보도자료 게재 현황판")
 
 # 연결 상태 확인
-with st.expander("🔧 연결 상태 확인"):
+with st.expander("🔧 연결 상태 확인", expanded=True):  # 기본으로 펼쳐지게
     try:
-        test_df = conn.read(worksheet=SHEET_NAME, header=None, ttl=0)
+        test_df = conn.read(worksheet=SHEET_NAME, usecols=list(range(50)), header=None, ttl=0)
         st.success(f"✅ 구글 시트 읽기 성공! (행: {len(test_df)}, 열: {test_df.shape[1]})")
+        
+        # 쓰기 권한 테스트
+        st.write("---")
+        st.write("**쓰기 권한 테스트:**")
+        if st.button("🧪 쓰기 테스트 (A1셀에 테스트 문구 쓰기)"):
+            try:
+                test_write_df = test_df.copy()
+                original_value = test_write_df.iloc[0, 0]
+                test_write_df.iloc[0, 0] = f"테스트_{datetime.now().strftime('%H:%M:%S')}"
+                
+                conn.update(worksheet=SHEET_NAME, data=test_write_df)
+                st.success("✅ 쓰기 성공! 구글 시트를 확인해보세요!")
+                st.info(f"원래 값: {original_value} → 테스트 값으로 변경됨")
+            except Exception as write_error:
+                st.error(f"❌ 쓰기 실패: {write_error}")
+                st.write("**해결 방법:** Service Account에 편집 권한을 부여하세요")
+        
+        st.write("---")
         st.write("첫 5행 미리보기:")
         st.dataframe(test_df.head())
     except Exception as e:
@@ -44,8 +62,8 @@ if st.button("🚀 현황판 업데이트 시작"):
         st.warning("내용을 입력해주세요.")
     else:
         try:
-            # 1. 시트 읽기
-            df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
+            # 1. 시트 읽기 - 범위 지정 (50개 열까지)
+            df = conn.read(worksheet=SHEET_NAME, usecols=list(range(50)), header=None).fillna("")
             
             # 최소 100행 확보
             if len(df) < 100:
