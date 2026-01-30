@@ -5,81 +5,89 @@ import re
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 
-# 페이지 설정
-st.set_page_config(page_title="삼천리 홍보팀 현황판", layout="wide")
+# 1. 페이지 설정
+st.set_page_config(page_title="삼천리 홍보팀 성과 관리 시스템", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_NAME = "2026년"
 
-st.title("🏢 보도자료 게재 현황 누적 관리")
+st.title("📊 보도자료 게재 성과 대시보드")
 
-# 입력부
-col1, col2 = st.columns([1, 2])
-with col1:
-    doc_date = st.date_input("배포 날짜", datetime.now())
-    doc_title = st.text_input("보도자료 제목")
-with col2:
-    raw_html = st.text_area("HTML 소스 붙여넣기", height=200)
+# 2. 상단 입력부
+with st.container():
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        doc_date = st.date_input("📅 배포 날짜", datetime.now())
+        doc_title = st.text_input("📝 보도자료 제목", placeholder="예: 삼천리 이태호 사장 취임")
+    with col2:
+        raw_html = st.text_area("🔗 HTML 소스 붙여넣기", height=150, placeholder="스크랩 HTML 소스를 여기에 붙여넣으세요.")
 
-if st.button("🚀 현황판 누적 업데이트"):
+# 3. 데이터 기록 로직
+if st.button("🚀 게재 내역 업데이트 및 분석"):
     if not doc_title or not raw_html:
-        st.warning("내용을 모두 입력해주세요.")
+        st.warning("제목과 HTML 소스를 입력해주세요.")
     else:
         try:
-            with st.spinner("업데이트 중..."):
-                # header=None으로 읽어와서 시트의 1행(index 0)부터 인식함
-                df = conn.read(worksheet=SHEET_NAME, header=None).fillna("")
-                
-                # HTML 분석
+            with st.spinner("데이터를 분석하고 성적표를 갱신 중입니다..."):
+                # HTML에서 매체명 추출
                 soup = BeautifulSoup(raw_html, 'html.parser')
-                found_media = {}
-                for a_tag in soup.find_all('a', href=True):
-                    url = a_tag['href']
-                    span = a_tag.find_next_sibling('span')
-                    if span:
-                        # (매체명 2026/01/23) 패턴에서 매체명 추출
-                        m = re.search(r'\((.*?) \d{4}', span.get_text())
-                        if m: found_media[m.group(1).strip()] = url
+                found_media = set()
+                for td in soup.find_all('td'):
+                    m = re.search(r'\((.*?) \d{4}', td.get_text())
+                    if m: found_media.add(m.group(1).strip())
 
-                # 새 결과 열 생성 (시트 전체 길이에 맞춤)
-                new_col = [""] * len(df)
-                
-                # [좌표 고정] index 0=1행, 1=2행, 2=3행
-                if len(new_col) >= 3:
-                    new_col[0] = f"Log_{datetime.now().strftime('%H%M%S')}" # 1행
-                    new_col[1] = doc_date.strftime('%m/%d')                # 2행
-                    new_col[2] = doc_title                                 # 3행
+                if not found_media:
+                    st.error("HTML에서 매체 정보를 찾을 수 없습니다.")
+                else:
+                    # 새로운 데이터 생성
+                    new_entries = pd.DataFrame({
+                        "배포일": [doc_date.strftime('%Y-%m-%d')] * len(found_media),
+                        "보도자료 제목": [doc_title] * len(found_media),
+                        "매체명": list(found_media)
+                    })
 
-                match_count = 0
-                # index 3(4행)부터 매체명 비교 시작
-                for i in range(len(df)):
-                    if i < 3: continue 
-                    
-                    sheet_media = str(df.iloc[i, 0]).strip()
-                    # 유효한 매체명이 있는 경우만 처리
-                    if not sheet_media or sheet_media in ["0", "1", "매체명"]: continue
-                    
-                    # 괄호 제거 후 순수 이름으로 매칭
-                    pure_name = re.sub(r'\(.*?\)', '', sheet_media).strip()
-                    
-                    found_url = None
-                    for m_name, url in found_media.items():
-                        if pure_name in m_name or m_name in pure_name:
-                            found_url = url
-                            break
-                    
-                    if found_url:
-                        new_col[i] = f'=HYPERLINK("{found_url}", "✅")'
-                        match_count += 1
-                    else:
-                        new_col[i] = "-"
+                    # 기존 데이터 읽기
+                    try:
+                        existing_df = conn.read(worksheet=SHEET_NAME).fillna("")
+                    except:
+                        existing_df = pd.DataFrame(columns=["배포일", "보도자료 제목", "매체명"])
 
-                # 기존 데이터프레임의 가장 오른쪽에 새 열 추가
-                df[f"Col_{datetime.now().strftime('%H%M%S')}"] = new_col
-                
-                # 시트 업데이트
-                conn.update(worksheet=SHEET_NAME, data=df)
-                st.success(f"✅ 업데이트 완료! (매칭: {match_count}건)")
-                st.balloons()
-                
+                    # 데이터 합치기 (중복 방지 로직 포함 - 동일 날짜/제목/매체는 제외)
+                    updated_df = pd.concat([existing_df, new_entries]).drop_duplicates().reset_index(drop=True)
+                    
+                    # 시트 업데이트
+                    conn.update(worksheet=SHEET_NAME, data=updated_df)
+                    st.success(f"✅ {len(found_media)}개 매체의 게재 내역이 안전하게 기록되었습니다!")
+
         except Exception as e:
             st.error(f"오류 발생: {e}")
+
+st.divider()
+
+# 4. 실시간 성적표(Dashboard) 영역
+st.subheader("📈 2026년 매체별 게재 성적표 (실시간)")
+
+try:
+    # 전체 데이터 다시 읽기
+    df = conn.read(worksheet=SHEET_NAME).fillna("")
+    
+    if not df.empty:
+        # 분석 1: 총 배포 건수 (고유한 제목의 개수)
+        total_pr_count = df["보도자료 제목"].nunique()
+        
+        # 분석 2: 매체별 게재 횟수 계산
+        scorecard = df.groupby("매체명").size().reset_index(name="게재 횟수")
+        scorecard["게재율 (%)"] = scorecard["게재 횟수"].apply(lambda x: f"{(x / total_pr_count * 100):.1f}%")
+        scorecard = scorecard.sort_values(by="게재 횟수", ascending=False).reset_index(drop=True)
+
+        # 화면 표시
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            st.metric("올해 총 배포 건수", f"{total_pr_count}건")
+        with c2:
+            st.dataframe(scorecard, use_container_width=True)
+            
+        st.caption("※ 게재율 = (해당 매체 게재 횟수 / 전체 보도자료 배포 건수) * 100")
+    else:
+        st.info("기록된 데이터가 없습니다. 보도자료 정보를 입력해 주세요.")
+except:
+    st.info("시트를 읽어오는 중입니다...")
